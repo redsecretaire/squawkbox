@@ -145,6 +145,10 @@
       border: 1px solid var(--border-color);
     }
   </style>
+
+  <!-- Firebase Libraries -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
 </head>
 <body>
 
@@ -181,6 +185,23 @@
   </div>
 
   <script>
+    // --- 1. FIREBASE CONFIGURATION ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyAyhqq-JHiZIJUvovnmLacsDjS2ktwmH_w",
+      authDomain: "squawkbox-chat.firebaseapp.com",
+      databaseURL: "https://squawkbox-chat-default-rtdb.firebaseio.com",
+      projectId: "squawkbox-chat",
+      storageBucket: "squawkbox-chat.firebasestorage.app",
+      messagingSenderId: "695440820032",
+      appId: "1:695440820032:web:dd5c04a471a524bdb31ca5"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const messagesRef = db.ref('messages');
+
+    // --- 2. REAL-TIME CHAT LOGIC ---
     function sendMessage() {
       const nameInput = document.getElementById('username-input');
       const msgInput = document.getElementById('message-input');
@@ -189,9 +210,21 @@
 
       if (!text) return;
 
-      renderMessage({ sender: user, text: text });
+      // Push message directly to Firebase database
+      messagesRef.push({
+        sender: user,
+        text: text,
+        timestamp: Date.now()
+      });
+
       msgInput.value = '';
     }
+
+    // Listen for new incoming messages from Firebase
+    messagesRef.on('child_added', (snapshot) => {
+      const msg = snapshot.val();
+      renderMessage(msg);
+    });
 
     function renderMessage(msg) {
       const log = document.getElementById('message-log');
@@ -211,6 +244,7 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    // --- 3. IDE & CODE INJECTION LOGIC ---
     function toggleEditor() {
       const panel = document.getElementById('editor-section');
       panel.classList.toggle('collapsed');
