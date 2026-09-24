@@ -145,10 +145,6 @@
       border: 1px solid var(--border-color);
     }
   </style>
-
-  <!-- Firebase Libraries -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
 </head>
 <body>
 
@@ -157,10 +153,21 @@
     <div id="chat-section">
       <header>
         <h1>Squawkbox GUI</h1>
+        <span
+                id="connection-state"
+                role="status"
+        >
+            LINK: CONNECTING
+          </span>
         <button id="toggle-editor-btn" onclick="toggleEditor()">Toggle IDE</button>
       </header>
 
-      <div id="message-log">
+      <div
+              id="message-log"
+              role="log"
+              aria-live="polite"
+              aria-label="Chat messages"
+      >
         <div class="message">
           <div class="sender">System</div>
           <div>Welcome to Squawkbox! Open the IDE panel to write dynamic scripts.</div>
@@ -168,8 +175,23 @@
       </div>
 
       <div id="chat-controls">
-        <input type="text" id="username-input" placeholder="Name" value="Dev1">
-        <input type="text" id="message-input" placeholder="Type a message..." onkeydown="if(event.key==='Enter') sendMessage()">
+        <input
+                type="text"
+                id="username-input"
+                aria-label="Display name"
+                placeholder="Name"
+                value="Dev1"
+        >
+        <input
+                type="text"
+                id="message-input"
+                aria-label="Message"
+                placeholder="Type a message..."
+                onkeydown="
+              if (event.key === 'Enter')
+              sendMessage()
+            "
+        >
         <button onclick="sendMessage()">Send</button>
       </div>
     </div>
@@ -185,46 +207,113 @@
   </div>
 
   <script>
-    // --- 1. FIREBASE CONFIGURATION ---
-    const firebaseConfig = {
-      apiKey: "AIzaSyAyhqq-JHiZIJUvovnmLacsDjS2ktwmH_w",
-      authDomain: "squawkbox-chat.firebaseapp.com",
-      databaseURL: "https://squawkbox-chat-default-rtdb.firebaseio.com",
-      projectId: "squawkbox-chat",
-      storageBucket: "squawkbox-chat.firebasestorage.app",
-      messagingSenderId: "695440820032",
-      appId: "1:695440820032:web:dd5c04a471a524bdb31ca5"
-    };
+    // --- 1. ADA WEBSOCKET CONNECTION ---
+    const protocol =
+            window.location.protocol ===
+            'https:'
+                    ? 'wss:'
+                    : 'ws:';
 
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
-    const messagesRef = db.ref('messages');
+    const host = window.location.host;
+    const address =
+            `${protocol}//${host}/chat`;
 
-    // --- 2. REAL-TIME CHAT LOGIC ---
-    function sendMessage() {
-      const nameInput = document.getElementById('username-input');
-      const msgInput = document.getElementById('message-input');
-      const text = msgInput.value.trim();
-      const user = nameInput.value.trim() || 'Anonymous';
+    const chatSocket =
+            new WebSocket(address);
 
-      if (!text) return;
+    chatSocket.addEventListener(
+            'open',
+            () => setConnectionState('open')
+    );
 
-      // Push message directly to Firebase database
-      messagesRef.push({
-        sender: user,
-        text: text,
-        timestamp: Date.now()
-      });
+    chatSocket.addEventListener(
+            'close',
+            () => setConnectionState('closed')
+    );
 
-      msgInput.value = '';
+    chatSocket.addEventListener(
+            'error',
+            () => setConnectionState('fault')
+    );
+
+    chatSocket.addEventListener(
+            'message',
+            (event) => {
+              let message;
+
+              try {
+                message =
+                        JSON.parse(event.data);
+              } catch {
+                message = {
+                  sender: 'SYSTEM',
+                  text: event.data
+                };
+              }
+
+              renderMessage(message);
+            }
+    );
+
+    function setConnectionState(state) {
+      const isOpen = state === 'open';
+      const stateDisplay =
+              document.getElementById(
+                      'connection-state'
+              );
+      const messageInput =
+              document.getElementById(
+                      'message-input'
+              );
+      const sendButton =
+              document.querySelector(
+                      '#chat-controls button'
+              );
+
+      stateDisplay.textContent =
+              `LINK: ${state.toUpperCase()}`;
+      messageInput.disabled = !isOpen;
+      sendButton.disabled = !isOpen;
+      messageInput.placeholder = isOpen
+              ? 'Type a message...'
+              : 'Link offline';
     }
 
-    // Listen for new incoming messages from Firebase
-    messagesRef.on('child_added', (snapshot) => {
-      const msg = snapshot.val();
-      renderMessage(msg);
-    });
+    function sendMessage() {
+      const nameInput =
+              document.getElementById(
+                      'username-input'
+              );
+      const messageInput =
+              document.getElementById(
+                      'message-input'
+              );
+      const text =
+              messageInput.value.trim();
+      const user =
+              nameInput.value.trim()
+              || 'Anonymous';
+      const socketIsOpen =
+              chatSocket.readyState ===
+              WebSocket.OPEN;
+
+      if (!text || !socketIsOpen) return;
+
+      const message = {
+        sender: user,
+        text: text
+      };
+
+      chatSocket.send(
+              JSON.stringify(message)
+      );
+
+      messageInput.value = '';
+      messageInput.focus();
+    }
+
+    setConnectionState('connecting');
+
 
     function renderMessage(msg) {
       const log = document.getElementById('message-log');
