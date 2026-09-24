@@ -1,0 +1,7 @@
+/obj/
+/bin/
+/alire/
+/config/
+/.idea/
+/node_modules/
+.DS_Store

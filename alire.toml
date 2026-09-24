@@ -1,0 +1,15 @@
+name = "squawkbox"
+description = "A live collaborative development server with integrated GUI."
+version = "0.1.0-dev"
+
+authors = ["rococo"]
+maintainers = ["rococo <rococo.baroquelogic@gmail.com>"]
+maintainers-logins = ["baroquelogic"]
+licenses = "custom-proprietary"
+website = ""
+tags = []
+
+executables = ["squawkbox"]
+
+[[depends-on]]
+aws = "=25.2.0"
