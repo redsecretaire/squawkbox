@@ -78,7 +78,7 @@
       gap: 8px;
     }
 
-    input[type="text"], textarea {
+    input[type=text], textarea {
       background-color: var(--bg-color);
       color: var(--text-color);
       border: 1px solid var(--border-color);
@@ -161,6 +161,42 @@
           </span>
         <button id="toggle-editor-btn" onclick="toggleEditor()">Toggle IDE</button>
       </header>
+
+<!-- ========================================== -->
+<!-- SHARED FILE READER PANEL                   -->
+<!-- ========================================== -->
+<section id="reader-section" aria-label="Shared Document Reader" style="border: 1px solid #444; margin: 10px 0; padding: 12px; border-radius: 6px; background: #1a1b26; color: #a9b1d6;">
+  
+  <header style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 8px; margin-bottom: 10px;">
+    <h3 style="margin: 0; font-size: 1.1em; color: #7aa2f7;">📖 Shared File Reader</h3>
+    
+    <!-- Follow Mode Toggle Switch -->
+    <label style="display: flex; align-items: center; gap: 6px; font-size: 0.9em; cursor: pointer;">
+      <input type="checkbox" id="follow-toggle">
+      <span>Follow Remote Reader</span>
+    </label>
+  </header>
+
+  <!-- File Selection & Controls -->
+  <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+    <input type="file" id="file-input" accept=".txt,.md,.log" aria-label="Select local text file">
+    <button id="sample-doc-btn" type="button" style="padding: 4px 8px; cursor: pointer;">Load Sample Doc</button>
+  </div>
+
+  <!-- Document Metadata & Status Bar -->
+  <div id="doc-metadata" style="font-family: monospace; font-size: 0.85em; background: #16161e; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+    <div><strong>File:</strong> <span id="meta-label">None loaded</span></div>
+    <div><strong>Size:</strong> <span id="meta-bytes">0 bytes</span></div>
+    <div><strong>SHA-256:</strong> <span id="meta-hash">N/A</span></div>
+    <div><strong>Sync Status:</strong> <span id="sync-status" style="font-weight: bold; color: #e0af68;">Disconnected / No Document</span></div>
+  </div>
+
+  <!-- Read-Only Document Viewer Area -->
+  <pre id="reader-view" tabindex="0" role="region" aria-label="Document Content" style="height: 200px; overflow-y: auto; background: #0f0f14; border: 1px solid #2ac3de; padding: 10px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; margin: 0;">
+Select a text file above to view its contents...
+  </pre>
+
+</section>
 
       <div
               id="message-log"
@@ -349,5 +385,139 @@
       }
     }
   </script>
+<script>
+  // ==========================================
+  // SHARED FILE READER LOGIC (Chunk 2)
+  // ==========================================
+
+  const fileInput = document.getElementById('file-input');
+  const sampleBtn = document.getElementById('sample-doc-btn');
+  const readerView = document.getElementById('reader-view');
+  const metaLabel = document.getElementById('meta-label');
+  const metaBytes = document.getElementById('meta-bytes');
+  const metaHash = document.getElementById('meta-hash');
+  const syncStatus = document.getElementById('sync-status');
+
+  // Utility to format byte counts into binary units (KiB, MiB)
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KiB', 'MiB', 'GiB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  // Calculate SHA-256 hash using the Web Crypto API
+  async function computeSHA256(text) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Helper to update UI with document contents and metadata
+  async function loadDocumentText(fileName, text) {
+    readerView.textContent = text;
+    const byteSize = new TextEncoder().encode(text).length;
+    const hash = await computeSHA256(text);
+
+    metaLabel.textContent = fileName;
+    metaBytes.textContent = `${byteSize.toLocaleString()} bytes (${formatBytes(byteSize)})`;
+    metaHash.textContent = hash;
+    syncStatus.textContent = "Document Loaded Locally";
+    syncStatus.style.color = "#9ece6a"; // Soft green
+  }
+
+  // Handle local file upload
+  fileInput.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      loadDocumentText(file.name, e.target.result);
+    };
+    reader.readAsText(file);
+  });
+
+  // Handle sample document load button
+  sampleBtn.addEventListener('click', () => {
+    const sampleText = "SQUAWKBOX SHARED DOCUMENT SAMPLE\n" +
+                       "---------------------------------\n" +
+                       "Line 1: Field inspection report initialized.\n" +
+                       "Line 2: Checking signal telemetry across local nodes...\n" +
+                       "Line 3: Synchronisation verified.\n" +
+                       "Line 4: End of transmission.";
+    loadDocumentText("sample_report.txt", sampleText);
+  });
+// ==========================================
+  // WEBSOCKET POSITION DISPATCHER (Chunk 3)
+  // ==========================================
+
+  const followToggle = document.getElementById('follow-toggle');
+  let localSeq = 0;
+  let remoteDocHash = null;
+
+  // Send scroll position when scrolling locally
+  readerView.addEventListener('scroll', () => {
+    if (!followToggle.checked) return;
+
+    const currentHash = metaHash.textContent;
+    if (!currentHash || currentHash === 'N/A') return;
+
+    localSeq++;
+    const scrollPercent = readerView.scrollTop / (readerView.scrollHeight - readerView.clientHeight);
+
+    const positionEvent = {
+      type: 'reader_position_event_v1', // Experimental protocol ID
+      seq: localSeq,
+      digest: currentHash,
+      bytes: parseInt(metaBytes.textContent),
+      scrollPercent: scrollPercent
+    };
+
+    // If WebSocket exists and is connected, dispatch position event
+    if (window.squawkSocket && window.squawkSocket.readyState === WebSocket.OPEN) {
+      window.squawkSocket.send(JSON.stringify(positionEvent));
+    }
+  });
+
+  // Handle incoming messages from WebSocket
+  function handleIncomingNetworkMessage(data) {
+    try {
+      const msg = JSON.parse(data);
+
+      // Separate Chat Messages from Reader Sync Events
+      if (msg.type === 'reader_position_event_v1') {
+        handleRemoteReaderEvent(msg);
+      } else if (msg.type === 'chat') {
+        // Handle regular chat message
+        displayChatMessage(msg);
+      }
+    } catch (e) {
+      // Ignore malformed or unparseable messages safely
+    }
+  }
+
+  // Apply remote scroll position if hashes match and follow mode is enabled
+  function handleRemoteReaderEvent(event) {
+    const localHash = metaHash.textContent;
+
+    if (localHash !== event.digest) {
+      syncStatus.textContent = "Document Revision Mismatch!";
+      syncStatus.style.color = "#f7768e"; // Warning Red
+      return;
+    }
+
+    syncStatus.textContent = "Synced with Remote Reader";
+    syncStatus.style.color = "#73daca"; // Soft Teal
+
+    if (followToggle.checked) {
+      const targetScroll = event.scrollPercent * (readerView.scrollHeight - readerView.clientHeight);
+      readerView.scrollTop = targetScroll;
+    }
+  }
+</script>
 </body>
 </html>
